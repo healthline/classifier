@@ -1,0 +1,6 @@
+{
+"host":"hl-db-dev.eng.healthline.com",
+"user":"hl_dev",
+"password":"hl_dev",
+"database":"hl_dev"
+}

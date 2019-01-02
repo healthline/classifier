@@ -1,0 +1,6 @@
+{
+"host":"hl-db-stage.eng.healthline.com",
+"user":"hl_stage",
+"password":"hl_stage",
+"database":"hl_stage"
+}

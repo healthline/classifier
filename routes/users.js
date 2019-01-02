@@ -57,6 +57,12 @@ function retrieveWeightsFromFS(filename) {
   }
   return weights;
 }*/
+function getDatabaseConfig(filename) {
+  var config = {};
+  var data = fs.readFileSync(filename, 'utf-8');
+  config = JSON.parse(data);
+  return config;
+}
 
 async function classifyArticle(req) {
   console.log('path: ' + req.baseUrl);
@@ -77,9 +83,10 @@ async function classifyArticle(req) {
     var docVector = parseContentBody(jsonObj);
     var normalizedDocVector = normalizeVector(docVector);
 
+    var configJson = getDatabaseConfig('config/database.cf');
     var mysqlObj = new MySQLWrapper();
-    var config = {'host':'172.29.155.248', 'user':'hl_dev', 'password':'hl_dev', 'database':'hl_dev'};
-    var conn = await mysqlObj.getConnection(config);
+    //var config = {'host':'172.29.155.248', 'user':'hl_dev', 'password':'hl_dev', 'database':'hl_dev'};
+    var conn = await mysqlObj.getConnection(configJson);
     if (conn == null) {
       res.status(400).send('Failed to connect to the database');
       return;

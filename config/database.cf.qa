@@ -1,0 +1,6 @@
+{
+"host":"hl-db-qa.eng.healthline.com",
+"user":"hl_qa",
+"password":"hl_qa",
+"database":"hl_qa"
+}
