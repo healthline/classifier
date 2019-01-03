@@ -1,10 +1,18 @@
 const mysql = require('mysql');
 const deasync = require('deasync');
+var fs = require("fs");
 
 class MySQLWrapper {
 
   constructor() {
     this.db = null;
+  }
+
+  getDatabaseConfig(filename) {
+    var config = {};
+    var data = fs.readFileSync(filename, 'utf-8');
+    config = JSON.parse(data);
+    return config;
   }
 
   async getConnection(configJson) {
@@ -54,25 +62,23 @@ class MySQLWrapper {
       console.log(query);
       conn.query(query, function(err, rows) {
         if (err) {
-          return reject(err);
+          console.log(err);
+          return null;//reject(err);
         }
         resolve(rows);
       });
     });
   }
 
-  async getK1ValuePromise(conn, imuid) {
-    var k1 = await this.getK1Helper(conn, imuid);
-    var k1val = '';
-    try {
-      k1val = k1[0]['k1_value'];
-    } catch (ex) {
-    }
-    return k1val;
-  }
-
   async getK1Value(conn, imuid) {
-    var k1 = await this.getK1ValuePromise(conn, imuid);
+    var k1val = await this.getK1Helper(conn, imuid);
+    var k1 = '';
+    if (k1val != null) {
+      try {
+        k1 = k1val[0]['k1_value'];
+      } catch (ex) {
+      }
+    }
     return k1;
   }
 
@@ -115,7 +121,7 @@ class MySQLWrapper {
       conn.query(query, function (error, rows) {
         if (error) {
           console.log(error);
-          return reject( error);
+          return [];//reject( error);
         }
         resolve(rows);
       });
@@ -127,26 +133,49 @@ class MySQLWrapper {
       var query = 'select k2_value from tax_k1_to_k2 where tax_k1_value = "' + k1value + '"';
       console.log(query);
       conn.query(query, function (error, rows) {
-        if (error)
-          return reject( error);
+        if (error) {
+          console.log(error);
+          return null;//reject( error);
+        }
         resolve(rows);
       });
     });
   }
 
-  async getK2ValueFromK1Promise(conn, k1value) {
-    var k2 = await this.getK2Helper(conn, k1value);
-    var k2val = '';
-    try {
-      k2val = k2[0]['k2_value'];
-    } catch (ex) {
+  async getK2ValueFromK1(conn, k1) {
+    var k2val = await this.getK2Helper(conn, k1);
+    var k2 = '';
+    if (k2val != null) {
+      try {
+        k2 = k2val[0]['k2_value'];
+      } catch (ex) {
       }
-    return k2val;
+    }
+    return k2;
   }
 
-  async getK2ValueFromK1(conn, k1) {
-    var k2 = await this.getK2ValueFromK1Promise(conn, k1);
-    return k2;
+  getImuidsHelper(conn, k1value) {
+    return new Promise(function(resolve, reject) {
+      var query = 'select distinct tax_imuid from tax_imuid_k1_copy where k1_value = "' + k1value + '" order by tax_imuid';
+      console.log(query);
+      conn.query(query, function (error, rows) {
+        if (error) {
+          console.log(error);
+          return [];//reject( error);
+        }
+        resolve(rows);
+      });
+    });
+  }
+
+  async getImuidsForK1(conn, k1) {
+    var rows = await this.getImuidsHelper(conn, k1);
+    var imuids = [];
+    for (var i=0; i<rows.length; i++) {
+      var imuid = rows[i]['tax_imuid'];
+      imuids.push(imuid);
+    }
+    return imuids;
   }
 
 };
