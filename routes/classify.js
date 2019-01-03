@@ -4,9 +4,12 @@ const MySQLWrapper = require('../MySQLWrapper.js');
 const S3Wrapper = require('../S3Wrapper.js');
 var fs = require("fs");
 var ClassifierResult = require('./ClassifierResult.js');
+var FinalResult = require('./FinalResult.js');
 
 var distinct_k1s = [];
 var k1_weights = {};
+var k1_primary_thresholds = {};
+var k1_secondary_thresholds = {};
 
 router.get('/', async function(req, res, next) {
   req.setTimeout(0);
@@ -17,7 +20,10 @@ router.get('/', async function(req, res, next) {
 async function classifyArticle(req) {
   console.log('path: ' + req.baseUrl);
   console.log('query: ' + JSON.stringify(req.query));
-  var classifierResults = [];
+  var finalResult = new FinalResult();
+  var closest = [];
+  var primary = [];
+  var secondary = [];
 
   var url = req.query['url'];
   console.log('Url to classify: ' + url);
@@ -54,7 +60,6 @@ async function classifyArticle(req) {
     if (k1_weights.hasOwnProperty(k1)) {
       weights = k1_weights[k1];
     } else {
-      console.log("Retrieving weights for " + k1);
       weights = await mysqlObj.getWeights(conn, k1);
       k1_weights[k1] = weights;
       var keys1 = Object.keys(weights);
@@ -65,12 +70,36 @@ async function classifyArticle(req) {
 
     var normalizedWeights = weights;
     var result = computeDotProduct(k1, prototypeId, normalizedDocVector, normalizedWeights);
-    classifierResults.push(result);
+    var primary_threshold = 0.0;
+    if (k1_primary_thresholds.hasOwnProperty(k1)) {
+      primary_threshold = k1_primary_thresholds[k1];
+    }
+    var secondary_threshold = 0.0;
+    if (k1_secondary_thresholds.hasOwnProperty(k1)) {
+      secondary_threshold = k1_secondary_thresholds[k1];
+    }
+    result.primary_threshold = primary_threshold;
+    result.secondary_threshold = secondary_threshold;
+    closest.push(result);
+
+    var primary_candidate = false;
+    if (primary_threshold > 0.1 && result.distance > primary_threshold && primary.length < 5) {
+      primary.push(result);
+      primary_candidate = true;
+    }
+
+    if (secondary_threshold > 0.1 && primary_candidate == false && result.distance > secondary_threshold && secondary.length < 5) {
+      secondary.push(result);
+    }
   }
   await mysqlObj.closeConnect(conn);
 
-  var sortedResults = classifierResults.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
-  return sortedResults.slice(0, 5);
+  var sortedClosest = closest.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
+  finalResult.closest = sortedClosest.slice(0, 5);
+  finalResult.primary = primary;
+  finalResult.secondary = secondary;
+
+  return finalResult;
 }
 
 function getPrototypeIds() {
@@ -96,6 +125,16 @@ function getPrototypeIds() {
       p2 = lines[i].indexOf('</title>');
       var title = lines[i].substring(p1+7, p2);
       prototypeIds[title] = id;
+
+      p1 = lines[i].indexOf('<primary_threshold>');
+      p2 = lines[i].indexOf('</primary_threshold>');
+      var primary_threshold = parseFloat(lines[i].substring(p1+19, p2));
+      k1_primary_thresholds[title] = primary_threshold;
+
+      p1 = lines[i].indexOf('<related_threshold>');
+      p2 = lines[i].indexOf('</related_threshold>');
+      var secondary_threshold = parseFloat(lines[i].substring(p1+19, p2));
+      k1_secondary_thresholds[title] = secondary_threshold;
     }
   }
   return prototypeIds;

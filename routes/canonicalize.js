@@ -17,7 +17,6 @@ async function processSolrDocs(client, imuids) {
     }
   }
   testimuid += ')';
-  console.log(testimuid.substring(0, 100));
 
   var result = await new Promise(function(resolve, reject) {
     var strQuery = client.query().q({sourcename:'hlcms', lang:'en', imuids:testimuid}).fl('cmsurl').start(0).rows(100000);
