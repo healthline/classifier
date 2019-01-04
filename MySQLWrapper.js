@@ -103,25 +103,30 @@ class MySQLWrapper {
     return k1s;
   }
 
-  async getWeights(conn, k1) {
-    var rows = await this.getK1WeightsHelper(conn, k1);
+  async getWeights(conn, k1s_str) {
+    var rows = await this.getK1WeightsHelper(conn, k1s_str);
     var k1_weights = {};
     for (var i=0; i<rows.length; i++) {
+      var k1_col = rows[i]['k1'];
       var term = rows[i]['term'];
       var weight = rows[i]['weight'];
-      k1_weights[term] = weight;
+      if (!k1_weights.hasOwnProperty(k1_col)) {
+        k1_weights[k1_col] = {};
+      }
+      k1_weights[k1_col][term] = weight;
     }
     return k1_weights;
   }
 
   getK1WeightsHelper(conn, k1value) {
     return new Promise(function(resolve, reject) {
-      var query = 'select term, weight from classifier_weights where k1="' + k1value + '"';
+      //var query = 'select term, weight from classifier_weights where k1="' + k1value + '"';
+      var query = 'select k1, term, weight from classifier_weights where k1 in ' + k1value;
       console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
           console.log(error);
-          return [];//reject( error);
+          return {};//reject( error);
         }
         resolve(rows);
       });

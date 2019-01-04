@@ -13,8 +13,12 @@ var k1_secondary_thresholds = {};
 
 router.get('/', async function(req, res, next) {
   req.setTimeout(0);
-  var results = await classifyArticle(req)
-  res.send(JSON.stringify(results));
+  var results = await classifyArticle(req);
+  if (results.length == 0) {
+    res.status(400).send('Failed to get content from S3 for the url: ' + req.query['url']);
+  } else {
+    res.send(JSON.stringify(results));
+  }
 });
 
 async function classifyArticle(req) {
@@ -29,8 +33,7 @@ async function classifyArticle(req) {
   console.log('Url to classify: ' + url);
   var jsonObj = await getContentFromS3(url);
   if (Object.keys(jsonObj).length == 0) {
-    res.status(400).send('Failed to get content from S3 for the url: ' + url);
-    return;
+    return [];
   }
 
   var docVector = parseContentBody(jsonObj);
@@ -50,25 +53,50 @@ async function classifyArticle(req) {
     distinct_k1s = k1s;
   }
   var prototypeIds = getPrototypeIds();
+
+  if (Object.keys(k1_weights).length == 0) {
+    var k1_str = '(';
+    for (const k1 of k1s) {
+      if (k1 == "idf") {
+        continue;
+      }
+      k1_str += '"' + k1 + '",';
+    }
+
+    var k1s_len = k1_str.length;
+    k1_str = k1_str.substring(0, k1s_len-1);
+    k1_str += ')';
+    k1_weights = await mysqlObj.getWeights(conn, k1_str);
+    await mysqlObj.closeConnect(conn);
+
+    for (const k1 of k1s) {
+      if (k1 == "idf") {
+        continue;
+      }
+
+      var current_k1_weights = k1_weights[k1];
+      var sum_weights = 0;
+      for (const word of Object.keys(current_k1_weights)) {
+        sum_weights += Math.pow(current_k1_weights[word], 2);
+      }
+      var doc_vector_length = Math.sqrt(sum_weights);
+
+      var check = 0.0;
+      for (const word of Object.keys(current_k1_weights)) {
+        k1_weights[k1][word] = current_k1_weights[word]/doc_vector_length;
+        check += Math.pow(k1_weights[k1][word], 2);
+      }
+      console.log('Normalized Sum weights ' + k1 + ': ' + Math.sqrt(check));
+    }
+  }
+
   for (const k1 of k1s) {
     if (k1 == "idf") {
       continue;
     }
-    console.log(k1);
     var prototypeId = prototypeIds[k1];
-    var weights = {};
-    if (k1_weights.hasOwnProperty(k1)) {
-      weights = k1_weights[k1];
-    } else {
-      weights = await mysqlObj.getWeights(conn, k1);
-      k1_weights[k1] = weights;
-      var keys1 = Object.keys(weights);
-      if (keys1.length == 0) {
-        console.log("db error");
-      }
-    }
 
-    var normalizedWeights = weights;
+    var normalizedWeights = k1_weights[k1];
     var result = computeDotProduct(k1, prototypeId, normalizedDocVector, normalizedWeights);
     var primary_threshold = 0.0;
     if (k1_primary_thresholds.hasOwnProperty(k1)) {
@@ -92,7 +120,6 @@ async function classifyArticle(req) {
       secondary.push(result);
     }
   }
-  await mysqlObj.closeConnect(conn);
 
   var sortedClosest = closest.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
   finalResult.closest = sortedClosest.slice(0, 5);
@@ -103,7 +130,7 @@ async function classifyArticle(req) {
 }
 
 function getPrototypeIds() {
-  var data = fs.readFileSync('20180803_thresholds_full.xml', 'utf-8');
+  var data = fs.readFileSync('20181119_thresholds_full.xml', 'utf-8');
   var lines = data.split("\n");
   var prototypeIds = {};
   var parseMode = 0;
