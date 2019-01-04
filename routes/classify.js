@@ -37,6 +37,12 @@ async function classifyArticle(req) {
   }
 
   var docVector = parseContentBody(jsonObj);
+  var sortedWords = Object.keys(docVector).sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+  var parsed_content = '';
+  for (var word of sortedWords) {
+    parsed_content += word + ", " + docVector[word] + "\n";
+  }
+  fs.writeFileSync('parsed_input.txt', parsed_content);
   var normalizedDocVector = normalizeVector(docVector);
 
   var mysqlObj = new MySQLWrapper();
@@ -54,7 +60,9 @@ async function classifyArticle(req) {
   }
   var prototypeIds = getPrototypeIds();
 
-  if (Object.keys(k1_weights).length == 0) {
+  if (Object.keys(k1_weights).length > 0) {
+    await mysqlObj.closeConnect(conn);
+  } else {
     var k1_str = '(';
     for (const k1 of k1s) {
       if (k1 == "idf") {
@@ -68,26 +76,6 @@ async function classifyArticle(req) {
     k1_str += ')';
     k1_weights = await mysqlObj.getWeights(conn, k1_str);
     await mysqlObj.closeConnect(conn);
-
-    for (const k1 of k1s) {
-      if (k1 == "idf") {
-        continue;
-      }
-
-      var current_k1_weights = k1_weights[k1];
-      var sum_weights = 0;
-      for (const word of Object.keys(current_k1_weights)) {
-        sum_weights += Math.pow(current_k1_weights[word], 2);
-      }
-      var doc_vector_length = Math.sqrt(sum_weights);
-
-      var check = 0.0;
-      for (const word of Object.keys(current_k1_weights)) {
-        k1_weights[k1][word] = current_k1_weights[word]/doc_vector_length;
-        check += Math.pow(k1_weights[k1][word], 2);
-      }
-      console.log('Normalized Sum weights ' + k1 + ': ' + Math.sqrt(check));
-    }
   }
 
   for (const k1 of k1s) {
@@ -218,7 +206,7 @@ function removeStopWords(clean_body) {
 function parseContentBody(jsonObj) {
   var docVector = {};
   var body = jsonObj["body"];
-  var clean_body = body.replace(/[\r\n]+/g, " ").replace(/<\/?[^>]+>/g, "").toLowerCase().replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");//body.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "").toLowerCase();
+  var clean_body = body.replace(/[\:\-’]/g, "").replace(/[\r\n]+/g, " ").replace(/<\/?[^>]+>/g, " ").toLowerCase().replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");//body.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "").toLowerCase();
   var body_no_stop_words = removeStopWords(clean_body);
   var body_words = body_no_stop_words;
   for (var i=0; i<body_words.length; i++) {
