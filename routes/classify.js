@@ -17,7 +17,12 @@ router.get('/', async function(req, res, next) {
   if (results.length == 0) {
     res.status(400).send('Failed to get content from S3 for the url: ' + req.query['url']);
   } else {
-    res.send(JSON.stringify(results));
+    var output = {};
+    output.article = {};
+    output.article.closest = results.closest;
+    output.article.primary = results.primary;
+    output.article.secondary = results.secondary;
+    res.send('' + JSON.stringify(output));
   }
 });
 
@@ -99,12 +104,12 @@ async function classifyArticle(req) {
     closest.push(result);
 
     var primary_candidate = false;
-    if (primary_threshold > 0.1 && result.distance > primary_threshold && primary.length < 5) {
+    if (primary_threshold > 0.1 && result.distance > primary_threshold) {//} && primary.length < 5) {
       primary.push(result);
       primary_candidate = true;
     }
 
-    if (secondary_threshold > 0.1 && primary_candidate == false && result.distance > secondary_threshold && secondary.length < 5) {
+    if (secondary_threshold > 0.1 && primary_candidate == false && result.distance > secondary_threshold) {//} && secondary.length < 5) {
       secondary.push(result);
     }
   }
