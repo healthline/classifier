@@ -9,7 +9,7 @@ var FinalResult = require('./FinalResult.js');
 var distinct_k1s = [];
 var k1_weights = {};
 var k1_primary_thresholds = {};
-var k1_secondary_thresholds = {};
+var k1_related_thresholds = {};
 
 router.get('/', async function(req, res, next) {
   req.setTimeout(0);
@@ -21,8 +21,8 @@ router.get('/', async function(req, res, next) {
     output.article = {};
     output.article.closest = results.closest;
     output.article.primary = results.primary;
-    output.article.secondary = results.secondary;
-    res.send('' + JSON.stringify(output));
+    output.article.related = results.related;
+    res.json(output);
   }
 });
 
@@ -32,7 +32,7 @@ async function classifyArticle(req) {
   var finalResult = new FinalResult();
   var closest = [];
   var primary = [];
-  var secondary = [];
+  var related = [];
 
   var url = req.query['url'];
   console.log('Url to classify: ' + url);
@@ -95,31 +95,79 @@ async function classifyArticle(req) {
     if (k1_primary_thresholds.hasOwnProperty(k1)) {
       primary_threshold = k1_primary_thresholds[k1];
     }
-    var secondary_threshold = 0.0;
-    if (k1_secondary_thresholds.hasOwnProperty(k1)) {
-      secondary_threshold = k1_secondary_thresholds[k1];
+    var related_threshold = 0.0;
+    if (k1_related_thresholds.hasOwnProperty(k1)) {
+      related_threshold = k1_related_thresholds[k1];
     }
     result.primary_threshold = primary_threshold;
-    result.secondary_threshold = secondary_threshold;
+    result.related_threshold = related_threshold;
     closest.push(result);
 
+/*    
     var primary_candidate = false;
     if (primary_threshold > 0.1 && result.distance > primary_threshold) {//} && primary.length < 5) {
       primary.push(result);
       primary_candidate = true;
     }
 
-    if (secondary_threshold > 0.1 && primary_candidate == false && result.distance > secondary_threshold) {//} && secondary.length < 5) {
-      secondary.push(result);
+    if (related_threshold > 0.1 && primary_candidate == false && result.distance > related_threshold) {//} && related.length < 5) {
+      related.push(result);
     }
+*/
   }
 
+
   var sortedClosest = closest.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
-  finalResult.closest = sortedClosest.slice(0, 5);
+
+
+
+
+  if(closest[0].distance == 0.0) {
+    closest.pop();
+    finalResult.primary = primary;
+    finalResult.related = related;
+    return finalResult;
+  }
+  var index = fillPrimaryRelated(closest, primary, related);
+  primary.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
+  related.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
+  finalResult.closest = sortedClosest.slice(index + 1, index + 6);
   finalResult.primary = primary;
-  finalResult.secondary = secondary;
+  finalResult.related = related;
 
   return finalResult;
+}
+
+function fillPrimaryRelated(closest, primary, related) {
+
+    var distances;
+    var firstBreak = 0.0;
+    var secondBreak = 0.0;
+    var firstIndex = 0;
+    var secondIndex = 0;
+    for(var i = 0; i < closest.length && i < 10; i++) {
+      var thisBreak = closest[i].distance - closest[i+1].distance;
+      if(thisBreak > firstBreak) {
+        firstBreak = thisBreak;
+        firstIndex = i;
+      }
+    }
+    for(var i = firstIndex + 1; i <  closest.length && i < 15; i++) {
+      var thisBreak = closest[i].distance - closest[i+1].distance;
+      if(thisBreak > secondBreak) {
+        secondBreak = thisBreak;
+        secondIndex = i;
+      }
+    }
+
+    for(var j = 0; j <= firstIndex; j++) {
+      primary.push(closest[j]);
+    }
+    for(var k = (firstIndex + 1); k <= secondIndex; k++) {
+      related.push(closest[k]);
+    }
+
+    return secondIndex;
 }
 
 function getPrototypeIds() {
@@ -153,8 +201,8 @@ function getPrototypeIds() {
 
       p1 = lines[i].indexOf('<related_threshold>');
       p2 = lines[i].indexOf('</related_threshold>');
-      var secondary_threshold = parseFloat(lines[i].substring(p1+19, p2));
-      k1_secondary_thresholds[title] = secondary_threshold;
+      var related_threshold = parseFloat(lines[i].substring(p1+19, p2));
+      k1_related_thresholds[title] = related_threshold;
     }
   }
   return prototypeIds;
