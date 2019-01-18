@@ -5,9 +5,11 @@ const S3Wrapper = require('../S3Wrapper.js');
 var fs = require("fs");
 var ClassifierResult = require('./ClassifierResult.js');
 var FinalResult = require('./FinalResult.js');
+//var Redis = require('ioredis');
+//const redis = require('redis');
 
 var distinct_k1s = [];
-var k1_weights = {};
+///var k1_weights = {};
 var k1_primary_thresholds = {};
 var k1_related_thresholds = {};
 
@@ -34,6 +36,8 @@ async function classifyArticle(req) {
   var primary = [];
   var related = [];
 
+  var k1_weights = {};
+
   var url = req.query['url'];
   console.log('Url to classify: ' + url);
   var jsonObj = await getContentFromS3(url);
@@ -43,15 +47,19 @@ async function classifyArticle(req) {
 
   var docVector = parseContentBody(jsonObj);
   var sortedWords = Object.keys(docVector).sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+  var normalizedDocVector = normalizeVector(docVector);
   var parsed_content = '';
   for (var word of sortedWords) {
-    parsed_content += word + ", " + docVector[word] + "\n";
+    parsed_content += "\"" + word + "\" : " + normalizedDocVector[word] + ", ";
   }
   fs.writeFileSync('parsed_input.txt', parsed_content);
-  var normalizedDocVector = normalizeVector(docVector);
 
   var mysqlObj = new MySQLWrapper();
-  var configJson = mysqlObj.getDatabaseConfig('config/database.cf');
+  var config_path = 'config/database.cf.dev';
+  if (__ENV__ == 'qa' || __ENV__ == 'stage' || __ENV__ == 'prod') {
+    config_path = 'config/database.cf.' + __ENV__;
+  }
+  var configJson = mysqlObj.getDatabaseConfig(config_path);
   var conn = await mysqlObj.getConnection(configJson);
   if (conn == null) {
     res.status(400).send('Failed to connect to the database');
@@ -65,14 +73,9 @@ async function classifyArticle(req) {
   }
   var prototypeIds = getPrototypeIds();
 
-  if (Object.keys(k1_weights).length > 0) {
-    await mysqlObj.closeConnect(conn);
-  } else {
+  if (Object.keys(k1_weights).length == 0) {
     var k1_str = '(';
     for (const k1 of k1s) {
-      if (k1 == "idf") {
-        continue;
-      }
       k1_str += '"' + k1 + '",';
     }
 
@@ -84,9 +87,6 @@ async function classifyArticle(req) {
   }
 
   for (const k1 of k1s) {
-    if (k1 == "idf") {
-      continue;
-    }
     var prototypeId = prototypeIds[k1];
 
     var normalizedWeights = k1_weights[k1];
@@ -102,25 +102,9 @@ async function classifyArticle(req) {
     result.primary_threshold = primary_threshold;
     result.related_threshold = related_threshold;
     closest.push(result);
-
-/*    
-    var primary_candidate = false;
-    if (primary_threshold > 0.1 && result.distance > primary_threshold) {//} && primary.length < 5) {
-      primary.push(result);
-      primary_candidate = true;
-    }
-
-    if (related_threshold > 0.1 && primary_candidate == false && result.distance > related_threshold) {//} && related.length < 5) {
-      related.push(result);
-    }
-*/
   }
 
-
   var sortedClosest = closest.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
-
-
-
 
   if(closest[0].distance == 0.0) {
     closest.pop();

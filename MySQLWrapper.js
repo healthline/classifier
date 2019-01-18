@@ -62,8 +62,9 @@ class MySQLWrapper {
       console.log(query);
       conn.query(query, function(err, rows) {
         if (err) {
+          reject( error);
           console.log(err);
-          return null;//reject(err);
+          return null;
         }
         resolve(rows);
       });
@@ -88,8 +89,9 @@ class MySQLWrapper {
       console.log(query);
       conn.query(query, function(err, rows) {
         if (err) {
+          reject( error);
           console.log(err);
-          return [];//reject(err);
+          return [];
         }
         resolve(rows);
       });
@@ -98,6 +100,9 @@ class MySQLWrapper {
     var k1s = [];
     for (var i=0; i<rows.length; i++) {
       var k1 = rows[i]['k1'];
+      if (k1 == 'idf') {
+        continue;
+      }
       k1s.push(k1);
     }
     return k1s;
@@ -108,7 +113,7 @@ class MySQLWrapper {
     var k1_weights = {};
     for (var i=0; i<rows.length; i++) {
       var k1_col = rows[i]['k1'];
-      var term = rows[i]['term'];
+      var term = rows[i]['term'].replace(/\\\"/g, "");
       var weight = rows[i]['weight'];
       if (!k1_weights.hasOwnProperty(k1_col)) {
         k1_weights[k1_col] = {};
@@ -122,11 +127,12 @@ class MySQLWrapper {
     return new Promise(function(resolve, reject) {
       //var query = 'select term, weight from classifier_weights where k1="' + k1value + '"';
       var query = 'select k1, term, weight from classifier_weights where k1 in ' + k1value;
-      console.log(query);
+      //console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
+          reject( error);
           console.log(error);
-          return {};//reject( error);
+          return {};
         }
         resolve(rows);
       });
@@ -139,8 +145,9 @@ class MySQLWrapper {
       console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
+          reject( error);
           console.log(error);
-          return null;//reject( error);
+          return null;
         }
         resolve(rows);
       });
@@ -165,8 +172,9 @@ class MySQLWrapper {
       console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
+          reject( error);
           console.log(error);
-          return [];//reject( error);
+          return [];
         }
         resolve(rows);
       });
@@ -182,7 +190,6 @@ class MySQLWrapper {
     }
     return imuids;
   }
-
 };
 
 module.exports = MySQLWrapper;
