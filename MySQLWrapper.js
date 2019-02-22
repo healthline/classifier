@@ -85,11 +85,11 @@ class MySQLWrapper {
 
   async getDistinctK1s(conn) {
     var rows = await new Promise(function(resolve, reject) {
-      var query = 'select distinct k1 from classifier_weights order by k1';
+      var query = 'select distinct k1_value from tax_imuid_k1_copy order by k1_value';
       console.log(query);
       conn.query(query, function(err, rows) {
         if (err) {
-          reject( error);
+          reject( err);
           console.log(err);
           return [];
         }
@@ -99,7 +99,7 @@ class MySQLWrapper {
 
     var k1s = [];
     for (var i=0; i<rows.length; i++) {
-      var k1 = rows[i]['k1'];
+      var k1 = rows[i]['k1_value'];
       if (k1 == 'idf') {
         continue;
       }
@@ -168,8 +168,8 @@ class MySQLWrapper {
 
   getImuidsHelper(conn, k1value) {
     return new Promise(function(resolve, reject) {
-      var query = 'select distinct tax_imuid from tax_imuid_k1_copy where k1_value = "' + k1value + '" order by tax_imuid';
-      console.log(query);
+      var query = 'select distinct tax_imuid from tax_imuid_k1_copy where k1_value = "' + k1value + '"';
+      //console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
           reject( error);
