@@ -14,7 +14,7 @@ var k1_related_thresholds = {};
 
 router.get('/', async function(req, res, next) {
   req.setTimeout(0);
-  var results = await classifyArticle(req);
+  var results = await classifyArticle(req, 'get');
   if (results.length == 0) {
     res.status(400).send('Failed to get content from S3 for the url: ' + req.query['url']);
   } else {
@@ -27,33 +27,57 @@ router.get('/', async function(req, res, next) {
   }
 });
 
-async function classifyArticle(req) {
+router.post('/', async function (req, res) {
+  if (!(req.body).hasOwnProperty('body')) {
+    res.status(400).send('data must be in format {body : value}');
+    return;
+  }
+  var data = req.body['body'];
+  if (typeof data == 'undefined' || data == null || data.length < 100) {
+    res.status(400).send('Insufficient data to classify');
+    return;
+  }
+
+  var results = await classifyArticle(req.body, 'post');
+  if (results.length == 0) {
+    res.status(400).send('Failed to get results for the content');
+  } else {
+    var output = {};
+    output.article = {};
+    output.article.closest = results.closest;
+    output.article.primary = results.primary;
+    output.article.related = results.related;
+    res.json(output);
+  }
+});
+
+async function classifyArticle(req, methodType) {
   console.log('path: ' + req.baseUrl);
   console.log('query: ' + JSON.stringify(req.query));
   var finalResult = new FinalResult();
   var closest = [];
   var primary = [];
   var related = [];
+  var jsonObj;
 
-  var url = req.query['url'];
-  console.log('Url to classify: ' + url);
-  var jsonObj = await getContentFromS3(url);
-  if (Object.keys(jsonObj).length == 0) {
-    return [];
+  if (methodType == 'post') {
+    jsonObj = req;
+  } else {
+    var url = req.query['url'];
+    console.log('Url to classify: ' + url);
+    var jsonObj = await getContentFromS3(url);
+    if (Object.keys(jsonObj).length == 0) {
+      return [];
+    }
   }
-
-  var fromDb = false;
-  if (typeof req.query['db'] != 'undefined' && req.query['db'] != null && req.query['db'] == true) {
-    fromDb = true;
-  }
-  console.log('from database? : ' + fromDb);
 
   var docVector = parseContentBody(jsonObj);
   var sortedWords = Object.keys(docVector).sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
   var normalizedDocVector = normalizeVector(docVector);
   var parsed_content = '';
   for (var word of sortedWords) {
-    parsed_content += "\"" + word + "\" : " + normalizedDocVector[word] + ", ";
+    //parsed_content += "\"" + word + "\" : " + normalizedDocVector[word] + ", ";
+    parsed_content += word + "\n";
   }
   fs.writeFileSync('parsed_input.txt', parsed_content);
 
@@ -76,40 +100,40 @@ async function classifyArticle(req) {
   }
   var prototypeIds = getPrototypeIds();
 
-  if (fromDb) {
-    console.log("weights from database");
-    var k1_str = '(';
-    for (const k1 of k1s) {
-      k1_str += '"' + k1 + '",';
-    }
+  var k1_str = '(';
+  for (const k1 of k1s) {
+    k1_str += '"' + k1 + '",';
+  }
 
-    var k1s_len = k1_str.length;
-    k1_str = k1_str.substring(0, k1s_len-1);
-    k1_str += ')';
-    var k1_weights = await mysqlObj.getWeights(conn, k1_str);
-    for (const k1 of k1s) {
-      var word_map = k1_weights[k1];
-      getResult(k1, word_map, normalizedDocVector, prototypeIds, closest);
-    }
-  } else {
-    console.log("weights from files");
-    for (const k1 of k1s) {
-      if (!fs.existsSync('tf_idf_docs/'+k1)) {
-        console.log("weights file for " + k1 + " does not exist");
-        continue;
-      }
-      var infile = fs.openSync('tf_idf_docs/'+k1, 'r');
-      var inlines = fs.readFileSync(infile).toString();
-      fs.closeSync(infile);
+  var k1s_len = k1_str.length;
+  k1_str = k1_str.substring(0, k1s_len-1);
+  k1_str += ')';
+  var k1_weights = await mysqlObj.getWeights(conn, k1_str);
 
-      var word_map = {};
-      var wts = inlines.split('\n');
-      for (var wt of wts) {
-        var toks = wt.split('\t');
-        word_map[toks[0]] = parseFloat(toks[1]);
-      }
-      getResult(k1, word_map, normalizedDocVector, prototypeIds, closest);
+  var db_keys = Object.keys(k1_weights);
+  db_keys = db_keys.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+  var num_keys = db_keys.length;
+  var file_num = 0;
+  var weights_file = fs.openSync('db_weights_0', 'w');
+  var cur_map = {};
+  for (var k=0; k<num_keys; k++) {
+    if (k > 0 && k%100 == 0) {
+      file_num++;
+      fs.writeFileSync(weights_file, JSON.stringify(cur_map));
+      cur_map = {};
+      cur_map[db_keys[k]] = k1_weights[db_keys[k]];
+      fs.closeSync(weights_file);
+      weights_file = fs.openSync('db_weights_'+file_num, 'w');
+    } else {
+      cur_map[db_keys[k]] = k1_weights[db_keys[k]];
     }
+  }
+  fs.writeFileSync(weights_file, JSON.stringify(cur_map));
+  fs.closeSync(weights_file);
+
+  for (const k1 of k1s) {
+    var word_map = k1_weights[k1];
+    getResult(k1, word_map, normalizedDocVector, prototypeIds, closest);
   }
 
   await mysqlObj.closeConnect(conn);
@@ -226,8 +250,12 @@ function computeDotProduct(k1, prototypeId, normalizedDocVector, normalizedWeigh
   classifierResult.prototype_id = prototypeId;
   var dotProduct = 0.0;
   var words = Object.keys(normalizedDocVector);
+  words.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
   for (var i=0; i<words.length; i++) {
     var word = words[i];
+    if (typeof normalizedWeights == 'undefined') {
+      continue;
+    }
     if (normalizedWeights.hasOwnProperty(word)) {
       dotProduct += (normalizedDocVector[word] * normalizedWeights[word]);
     }
@@ -273,8 +301,14 @@ function parseContentBody(jsonObj) {
   var body = jsonObj["body"];
   body = body.toLowerCase().replace(/<script[^>]*>.*?<\/script>/g, '');
   body = body.replace(/<!\-\-.*?\-\->/g, '');
-  //var clean_body = body.replace(/[\:\-’]/g, "").replace(/[\r\n]+/g, " ").replace(/<\/?[^>]+>/g, " ").toLowerCase().replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");//body.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "").toLowerCase();
+  //var clean_body = body.replace(/[\:\-’]/g, "").replace(/[\r\n]+/g, " ").replace(/<\/?[^>]+>/g, " ").toLowerCase().replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");
+
+// michael parsing
+//  var content = body.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "").toLowerCase();
+
+// my parsing
   var content = body.replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\(\)]/g, '').replace(/&nbsp;/g, ' ').replace(/&hellip;/g, ' ').replace(/&#8217;/g, '\'').replace(/&amp;/g, '&');
+  var content = content.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "");
   var toks = content.split(' ');
   var clean_content = '';
   for (var w=0; w<toks.length; w++) {

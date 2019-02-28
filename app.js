@@ -8,7 +8,7 @@ var bodyParser = require('body-parser');
 var index = require('./routes/index');
 var classify = require('./routes/classify');
 var canonicalize = require('./routes/canonicalize');
-var cachek1weights = require('./routes/cachek1weights');
+var testutility = require('./routes/testutility');
 
 var app = express();
 
@@ -27,7 +27,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/', index);
 app.use('/classify', classify);
 app.use('/canonicalize', canonicalize);
-app.use('/cachek1weights', cachek1weights);
+app.use('/testutility', testutility);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {

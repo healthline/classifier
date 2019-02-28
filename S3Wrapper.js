@@ -92,7 +92,7 @@ class S3Wrapper {
     var modUrl = url.substring(pos);
     var toks = modUrl.split('/');
     var first = toks[0];
-    var newUrl = modUrl.substring(first.length+1).replace('/', '__');
+    var newUrl = modUrl.substring(first.length+1).replace(/\//g, '__');
     if (first == 'health') {
       return ('healthfeature/healthfeature-' + newUrl);
     } else if (first == 'nutrition') {
@@ -114,6 +114,7 @@ class S3Wrapper {
       return null;
     }
     newUrl = this.modifyUrl(url);
+    console.log(newUrl);
     var s3 = new AWS.S3();
     var bucketName = 'hl-json-data-prod';
 

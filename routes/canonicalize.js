@@ -105,6 +105,7 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
   var s3 = new S3Wrapper();
   for (const k1 of k1s) {
     if (fs.existsSync('super_docs/' + k1)) {
+      //console.log('super_doc for ' + k1 + ' exists');
       continue;
     }
     var k1_super_doc = fs.openSync('super_docs/' + k1, 'a');
@@ -115,7 +116,12 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
     var urlcnt = 0;
     for (var u=0; u<urls.length; u++) {
       var temp_url = urls[u];
+      //console.log(temp_url);
       var this_url_imuids = url_imuids_map[temp_url];
+
+      if (temp_url == 'newsarticles-hot-yoga-booming-but-it-may-be-bad-for-you-051515.json') {
+        console.log(temp_url);
+      }
 
       var found_first = false;
       var first_imuid = parseInt(this_url_imuids[0]);
@@ -126,6 +132,9 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
         }
       }
       if (!found_first) {
+        if (temp_url == 'newsarticles-hot-yoga-booming-but-it-may-be-bad-for-you-051515.json') {
+          console.log('no first imuid match');
+        }
         continue;
       }
 
@@ -142,6 +151,9 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
       var obj = await s3.getS3Data(urls[u], contentType);
       num_files += 1;
       if (obj == null) {
+        if (temp_url == 'newsarticles-hot-yoga-booming-but-it-may-be-bad-for-you-051515.json') {
+          console.log('no content for this article');
+        }
         console.log('null content for ' + urls[u]);
         continue;
       }
@@ -165,7 +177,8 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
 
 function createK1CleanDocuments(k1s) {
   for (const k1 of k1s) {
-    if (fs.existsSync('super_docs/'+k1)) {
+    if (fs.existsSync('clean_super_docs/'+k1)) {
+      console.log('clean superdoc for ' + k1 + ' exists');
       continue;
     }
     console.log('processing ' + k1);
@@ -175,15 +188,18 @@ function createK1CleanDocuments(k1s) {
     input_content = input_content.toString();
     fs.closeSync(input_file);
 
+    console.log('creating noscript doc for ' + k1);
     var output_file1 = fs.openSync('noscript_super_docs/'+k1, 'w');
     input_content = input_content.toLowerCase().replace(/<script[^>]*>.*?<\/script>/g, '');
     input_content = input_content.replace(/<!\-\-.*?\-\->/g, '');
     fs.writeFileSync(output_file1, input_content);
     fs.closeSync(output_file1);
 
+    console.log('creating clean superdoc for ' + k1);
     var output_file = fs.openSync('clean_super_docs/'+k1, 'w');
     //var content = input_content.replace(/[\:’]/g, "").replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");
     var content = input_content.replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\(\)]/g, '').replace(/&nbsp;/g, ' ').replace(/&hellip;/g, ' ').replace(/&#8217;/g, '\'').replace(/&amp;/g, '&');
+    var content = content.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "");
     var toks = content.split(' ');
     var clean_content = '';
     for (var w=0; w<toks.length; w++) {
@@ -235,6 +251,18 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map) {
     fs.closeSync(input_file);
     var toks = removeStopWords(input_content);//input_content.split(' ');
 
+    toks.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+    var words_file = fs.openSync('k1_words/'+k1, 'a');
+    var prevWord = '';
+    for (var tk of toks) {
+      if (tk == prevWord) {
+        continue;
+      }
+      fs.writeFileSync(words_file, tk + '\n');
+      prevWord = tk;
+    }
+    fs.closeSync(words_file);
+
     var bigrams = [];
     var distinct_word_map = {};
 
@@ -277,7 +305,7 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map) {
 }
 
 function createWeightsFiles(doc_word_freq_map, word_doc_freq_map) {
-  var WEIGHT_THRESHOLD = 0.005;
+  var WEIGHT_THRESHOLD = 0.003;
   var docKeys = Object.keys(doc_word_freq_map);
   var numDocs = docKeys.length;
   for (var thisK1 of docKeys) {
@@ -390,7 +418,7 @@ router.get('/', async function(req, res, next) {
 
   createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map);
 
-  createWeightsFiles(doc_word_freq_map, word_doc_freq_map);
+  //createWeightsFiles(doc_word_freq_map, word_doc_freq_map);
 
   var json_obj = {k1_count : k1s.length};
   res.send(JSON.stringify(json_obj));
