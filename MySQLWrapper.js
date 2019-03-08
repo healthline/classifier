@@ -205,12 +205,23 @@ class MySQLWrapper {
     });
   }
 
-  async insertWeightForK1Term(conn, k1, term, weight) {
+  async insertWeightForK1(conn, k1, weights) {
+    var insertQuery = 'insert into santosh_classifier_weights (k1, term, weight) values ';
+    var terms = Object.keys(weights);
+    var num = terms.length;
+    if (num < 1) {
+      return true;
+    }
+    for (var k=0; k<num; k++) {
+      insertQuery += '("' + k1 + '","' + terms[k] + '",' + weights[terms[k]]+ ')';
+      if (k < num-1) {
+        insertQuery += ',';
+      }
+    }
     return new Promise(function(resolve, reject) {
-      var query = 'insert into santosh_classifier_weights (k1, term, weight) values ("' + k1 + '", "' + term + '", ' + weight + ')';
-      //console.log(query);
-      conn.query(query, function (error, rows) {
+      conn.query(insertQuery, function (error, rows) {
         if (error) {
+          console.log(error);
           resolve(false);
         } else {
           resolve(true);

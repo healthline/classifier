@@ -185,12 +185,12 @@ function createK1CleanDocuments(k1s) {
     input_content = input_content.toString();
     fs.closeSync(input_file);
 
-    console.log('creating noscript doc for ' + k1);
-    var output_file1 = fs.openSync('noscript_super_docs/'+k1, 'w');
+    //console.log('creating noscript doc for ' + k1);
+    //var output_file1 = fs.openSync('noscript_super_docs/'+k1, 'w');
     input_content = input_content.toLowerCase().replace(/<script[^>]*>.*?<\/script>/g, '');
     input_content = input_content.replace(/<!\-\-.*?\-\->/g, '');
-    fs.writeFileSync(output_file1, input_content);
-    fs.closeSync(output_file1);
+    //fs.writeFileSync(output_file1, input_content);
+    //fs.closeSync(output_file1);
 
     var input_lines = input_content.split("\n");
 
@@ -378,11 +378,11 @@ async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_fr
     }
     var total_distance = Math.sqrt(total_distance_squared);
 
-    ///await mysqlObj.deleteWeightsForK1(conn, thisK1);
+    await mysqlObj.deleteWeightsForK1(conn, thisK1);
     console.log('writing weights to file for ' + thisK1);
 
     var normalized_weights = {};
-    var tf_idf_doc_debug = fs.openSync('tf_idf_docs/' + thisK1 + '_debug', "a");
+    //var tf_idf_doc_debug = fs.openSync('tf_idf_docs/' + thisK1 + '_debug', "a");
     var words2 = Object.keys(word_weights_map);
     var sorted_words2 = words2.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
     for (var wd of sorted_words2) {
@@ -393,16 +393,16 @@ async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_fr
       }
       normalized_weights[wd] = wt.toFixed(4);
 
-      var df = word_weights_map[wd][0];
-      var idf = word_weights_map[wd][1];
+      //var df = word_weights_map[wd][0];
+      //var idf = word_weights_map[wd][1];
 
-      var line = wd + '\t' + tf + '\t' + df + '\t' + idf + '\t' + normalized_weights[wd] + '\n';
-      fs.writeFileSync(tf_idf_doc_debug, line);
-
-      ////await mysqlObj.insertWeightForK1Term(conn, thisK1, wd, normalized_weights[wd]);
+      //var line = wd + '\t' + tf + '\t' + df + '\t' + idf + '\t' + normalized_weights[wd] + '\n';
+      //fs.writeFileSync(tf_idf_doc_debug, line);
     }
-    fs.closeSync(tf_idf_doc_debug);
+    //fs.closeSync(tf_idf_doc_debug);
     console.log(thisK1 + ', word_count: ' + Object.keys(word_weights_map).length + ', word_count_above_threshold: ' + Object.keys(normalized_weights).length);
+
+    await mysqlObj.insertWeightForK1(conn, thisK1, normalized_weights);
 
     var tf_idf_doc = fs.openSync('tf_idf_docs/' + thisK1, "a");
     for (var wd of Object.keys(normalized_weights)) {
