@@ -71,11 +71,14 @@ function getDistinctK1sFromFile() {
   return distinct_k1s;
 }
 
-async function getDataFromDatabase(k1s) {
-  var k1ImuidsMap = {};
-  var mysqlObj = new MySQLWrapper();
+async function getDatabaseConnection(mysqlObj) {
   var configJson = mysqlObj.getDatabaseConfig('config/database.cf');
-  var conn = await mysqlObj.getConnection(configJson);
+  conn = await mysqlObj.getConnection(configJson);
+  return conn;
+}
+
+async function getDataFromDatabase(mysqlObj, conn, k1s) {
+  var k1ImuidsMap = {};
   if (conn == null) {
     return {};
   }
@@ -103,11 +106,13 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
   var num_files = 0;
   var outfile = fs.openSync('k1_num_urls', 'a');
   var s3 = new S3Wrapper();
+  var counter = 0;
   for (const k1 of k1s) {
     if (fs.existsSync('super_docs/' + k1)) {
       //console.log('super_doc for ' + k1 + ' exists');
       continue;
     }
+    counter++;
     var k1_super_doc = fs.openSync('super_docs/' + k1, 'a');
     var k1_imuids = k1ImuidsMap[k1];
     console.log('+++ processing +++ ' + k1);
@@ -119,10 +124,6 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
       //console.log(temp_url);
       var this_url_imuids = url_imuids_map[temp_url];
 
-      if (temp_url == 'newsarticles-hot-yoga-booming-but-it-may-be-bad-for-you-051515.json') {
-        console.log(temp_url);
-      }
-
       var found_first = false;
       var first_imuid = parseInt(this_url_imuids[0]);
       for (var k=0; k<k1_imuids.length; k++) {
@@ -132,9 +133,6 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
         }
       }
       if (!found_first) {
-        if (temp_url == 'newsarticles-hot-yoga-booming-but-it-may-be-bad-for-you-051515.json') {
-          console.log('no first imuid match');
-        }
         continue;
       }
 
@@ -145,15 +143,12 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
         contentType = "authoritynutrition";
       } else if (temp_url.indexOf("newsarticles") > -1) {
         contentType = "newsarticles";
-      } else if (temp_url.indexOf("sponsoredprogram") > -1) {
-        contentType = "sponsoredprogram";
+      } else if (temp_url.indexOf("partner_article") > -1) {
+        contentType = "partner_article";
       }
       var obj = await s3.getS3Data(urls[u], contentType);
       num_files += 1;
       if (obj == null) {
-        if (temp_url == 'newsarticles-hot-yoga-booming-but-it-may-be-bad-for-you-051515.json') {
-          console.log('no content for this article');
-        }
         console.log('null content for ' + urls[u]);
         continue;
       }
@@ -164,7 +159,7 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
       var articleBody = title3Times + articleJson['body'];
       var oneLineArticleBody = articleBody.replace(/[\r\n]+/g, " ").replace('&nbsp;', ' ').replace('&hellip;', ' ').replace('&amp;', '&');
       //console.log(urls[u]);
-      fs.writeFileSync(k1_super_doc, oneLineArticleBody + '\n\n');
+      fs.writeFileSync(k1_super_doc, oneLineArticleBody + '\n');
       urlcnt += 1;
     }
 
@@ -176,11 +171,13 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
 }
 
 function createK1CleanDocuments(k1s) {
+  var counter = 0;
   for (const k1 of k1s) {
     if (fs.existsSync('clean_super_docs/'+k1)) {
       console.log('clean superdoc for ' + k1 + ' exists');
       continue;
     }
+    counter++;
     console.log('processing ' + k1);
 
     var input_file = fs.openSync('super_docs/'+k1, 'r');
@@ -195,52 +192,64 @@ function createK1CleanDocuments(k1s) {
     fs.writeFileSync(output_file1, input_content);
     fs.closeSync(output_file1);
 
+    var input_lines = input_content.split("\n");
+
     console.log('creating clean superdoc for ' + k1);
-    var output_file = fs.openSync('clean_super_docs/'+k1, 'w');
-    //var content = input_content.replace(/[\:’]/g, "").replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");
-    var content = input_content.replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\(\)]/g, '').replace(/&nbsp;/g, ' ').replace(/&hellip;/g, ' ').replace(/&#8217;/g, '\'').replace(/&amp;/g, '&');
-    var content = content.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "");
-    var toks = content.split(' ');
-    var clean_content = '';
-    for (var w=0; w<toks.length; w++) {
-      var wd = toks[w];
-      if (!isNaN(wd)) {
-        continue;
-      }
-      var wdlen = wd.length;
-      var firststr = wd.substring(0,1);
-      var laststr = wd.substring(wdlen-1);
-      if (!laststr.match(/^[0-9a-zA-Z]+/)) {
-        wd = wd.substring(0, wdlen-1);
-      }
-      if (!firststr.match(/^[0-9a-zA-Z]+/)) {
-        wd = wd.substring(1);
-      }
+    var output_file = fs.openSync('clean_super_docs/'+k1, 'a');
 
-      var fullmatch = true;
-      for (var l=0; l<wd.length; l++) {
-        var tmp = wd.substring(l, l+1);
-        if (!tmp.match(/[\W0-9]+/)) {
-          fullmatch = false;
-          break;
+    var linecount = 0;
+    for (var input_line of input_lines) {
+      linecount++;
+      console.log(linecount + ": " + input_line.substring(0, 10));
+      //var content = input_content.replace(/[\:’]/g, "").replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");
+      var content = input_line.replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\(\)]/g, '').replace(/&nbsp;/g, ' ').replace(/&hellip;/g, ' ').replace(/&#8217;/g, '\'').replace(/&amp;/g, '&');
+      var content = content.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "");
+      var toks = content.split(' ');
+      var clean_content = '';
+      for (var w=0; w<toks.length; w++) {
+        var wd = toks[w];
+        if (!isNaN(wd) || wd.length < 3) {
+          continue;
         }
-      }
-      if (fullmatch) {
-        continue;
-      }
-      if (wd.match(/[°]+/)) {
-        continue;
-      }
+        var wdlen = wd.length;
+        var firststr = wd.substring(0,1);
+        var laststr = wd.substring(wdlen-1);
+        if (!laststr.match(/^[0-9a-zA-Z]+/)) {
+          wd = wd.substring(0, wdlen-1);
+        }
+        if (!firststr.match(/^[0-9a-zA-Z]+/)) {
+          wd = wd.substring(1);
+        }
 
-      clean_content = clean_content + ' ' + wd;
+        var fullmatch = true;
+        for (var l=0; l<wd.length; l++) {
+          var tmp = wd.substring(l, l+1);
+          if (!tmp.match(/[\W0-9]+/)) {
+            fullmatch = false;
+            break;
+          }
+        }
+        if (fullmatch) {
+          continue;
+        }
+        if (wd.match(/[°]+/)) {
+          continue;
+        }
+
+        clean_content = clean_content + ' ' + wd;
+      }
+      fs.writeFileSync(output_file, clean_content + '\n');
     }
-    fs.writeFileSync(output_file, clean_content);
     fs.closeSync(output_file);
   }
 }
 
-function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map) {
+function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq_map_mz) {
+  var counter = 0;
+  var global_doc_count = 0;
+  var total_distinct_word_count = 0;
   for (const k1 of k1s) {
+    counter++;
     doc_word_freq_map[k1] = {};
 
     console.log('processing ' + k1);
@@ -249,49 +258,73 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map) {
     var input_content = fs.readFileSync(input_file);
     input_content = input_content.toString().toLowerCase();
     fs.closeSync(input_file);
-    var toks = removeStopWords(input_content);//input_content.split(' ');
 
-    toks.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
-    var words_file = fs.openSync('k1_words/'+k1, 'a');
-    var prevWord = '';
-    for (var tk of toks) {
-      if (tk == prevWord) {
-        continue;
-      }
-      fs.writeFileSync(words_file, tk + '\n');
-      prevWord = tk;
-    }
-    fs.closeSync(words_file);
-
-    var bigrams = [];
+    var input_lines = input_content.split("\n");
     var distinct_word_map = {};
+    var linecount = 0;
+    for (var input_line of input_lines) {
+      global_doc_count++;
+      linecount++;
+      var this_doc_word_map = {};
+      var toks = removeStopWords(input_line);
 
-    for (var w=1; w<toks.length; w++) {
-      var bigram = toks[w-1] + "_" + toks[w];
-      bigrams.push(bigram);
-    }
-
-    for (var w=0; w<toks.length; w++) {
-      if (!distinct_word_map.hasOwnProperty(toks[w])) {
-        distinct_word_map[toks[w]] = 1;
-      } else {
-        var freq = distinct_word_map[toks[w]];
-        distinct_word_map[toks[w]] = freq+1;
+      var prevWord = '';
+      for (var tk of toks) {
+        if (!this_doc_word_map.hasOwnProperty(tk)) {
+          this_doc_word_map[tk] = 1;
+        } else {
+          this_doc_word_map[tk] += 1;
+        }
+        if (tk == prevWord) {
+          continue;
+        }
+        prevWord = tk;
       }
-    }
 
-    for (var w=0; w<bigrams.length; w++) {
-      if (!distinct_word_map.hasOwnProperty(bigrams[w])) {
-        distinct_word_map[bigrams[w]] = 1;
-      } else {
-        var freq = distinct_word_map[bigrams[w]];
-        distinct_word_map[bigrams[w]] = freq+1;
+      var bigrams = [];
+      for (var w=0; w<toks.length-1; w++) {
+        var bigram = toks[w] + "_" + toks[w+1];
+        bigrams.push(bigram);
+        this_doc_word_map[bigram] = 1;
+      }
+
+      for (var w=0; w<toks.length; w++) {
+        if (!distinct_word_map.hasOwnProperty(toks[w])) {
+          distinct_word_map[toks[w]] = 1;
+        } else {
+          var freq = distinct_word_map[toks[w]];
+          distinct_word_map[toks[w]] = freq+1;
+        }
+      }
+
+      for (var w=0; w<bigrams.length; w++) {
+        if (!distinct_word_map.hasOwnProperty(bigrams[w])) {
+          distinct_word_map[bigrams[w]] = 1;
+        } else {
+          var freq = distinct_word_map[bigrams[w]];
+          distinct_word_map[bigrams[w]] = freq+1;
+        }
+      }
+
+      var this_doc_distinct_words = Object.keys(this_doc_word_map);
+      for (var dword of this_doc_distinct_words) {
+        if (word_doc_freq_map_mz.hasOwnProperty(dword)) {
+          word_doc_freq_map_mz[dword] += this_doc_word_map[dword];
+        } else {
+          word_doc_freq_map_mz[dword] = this_doc_word_map[dword];
+        }
       }
     }
 
     doc_word_freq_map[k1] = distinct_word_map;
 
-    console.log('computing doc freqs');
+    var tmp2 = Object.keys(distinct_word_map);
+    var tmp2 = tmp2.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+    var words_file = fs.openSync('k1_words/'+k1, 'a');
+    for (var wd of tmp2) {
+      fs.writeFileSync(words_file, wd + '\n');
+    }
+    fs.closeSync(words_file);
 
     var distinct_words = Object.keys(distinct_word_map);
     for (var dword of distinct_words) {
@@ -301,14 +334,24 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map) {
         word_doc_freq_map[dword] = 1;
       }
     }
+
+    total_distinct_word_count += distinct_words.length;
   }
+  console.log("Total distinct words: " + total_distinct_word_count);
+  return global_doc_count;
 }
 
-function createWeightsFiles(doc_word_freq_map, word_doc_freq_map) {
+async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map, globalDocCount) {
+
+  var exisitng_weights = {};
+
   var WEIGHT_THRESHOLD = 0.003;
   var docKeys = Object.keys(doc_word_freq_map);
-  var numDocs = docKeys.length;
+  var numDocs = globalDocCount*3;//docKeys.length;
   for (var thisK1 of docKeys) {
+    if (exisitng_weights.hasOwnProperty(thisK1)) {
+      continue;
+    }
     console.log('calculating weights for ' + thisK1);
     var word_weights_map = {};
     var word_freq_map = doc_word_freq_map[thisK1];
@@ -335,6 +378,9 @@ function createWeightsFiles(doc_word_freq_map, word_doc_freq_map) {
     }
     var total_distance = Math.sqrt(total_distance_squared);
 
+    ///await mysqlObj.deleteWeightsForK1(conn, thisK1);
+    console.log('writing weights to file for ' + thisK1);
+
     var normalized_weights = {};
     var tf_idf_doc_debug = fs.openSync('tf_idf_docs/' + thisK1 + '_debug', "a");
     var words2 = Object.keys(word_weights_map);
@@ -352,6 +398,8 @@ function createWeightsFiles(doc_word_freq_map, word_doc_freq_map) {
 
       var line = wd + '\t' + tf + '\t' + df + '\t' + idf + '\t' + normalized_weights[wd] + '\n';
       fs.writeFileSync(tf_idf_doc_debug, line);
+
+      ////await mysqlObj.insertWeightForK1Term(conn, thisK1, wd, normalized_weights[wd]);
     }
     fs.closeSync(tf_idf_doc_debug);
     console.log(thisK1 + ', word_count: ' + Object.keys(word_weights_map).length + ', word_count_above_threshold: ' + Object.keys(normalized_weights).length);
@@ -386,14 +434,16 @@ router.get('/', async function(req, res, next) {
 
   // cleanup result directories
   //rimraf.sync('./super_docs');
-  //rimraf.sync('./noscript_super_docs');
-  //rimraf.sync('./clean_super_docs');
+  rimraf.sync('./noscript_super_docs');
+  rimraf.sync('./clean_super_docs');
   rimraf.sync('./tf_idf_docs');
+  rimraf.sync('./k1_words');
 
   //fs.mkdirSync('./super_docs');
-  //fs.mkdirSync('./noscript_super_docs');
-  //fs.mkdirSync('./clean_super_docs');
+  fs.mkdirSync('./noscript_super_docs');
+  fs.mkdirSync('./clean_super_docs');
   fs.mkdirSync('./tf_idf_docs');
+  fs.mkdirSync('./k1_words');
 
   // time consuming step - 1
   if (!fs.existsSync('url_imuids_map')) {
@@ -405,20 +455,33 @@ router.get('/', async function(req, res, next) {
 
   var url_imuids_map = getUrlImuidsMap();
 
+  var mysqlObj = new MySQLWrapper();
+
   var k1s = [];
-  var k1ImuidsMap = await getDataFromDatabase(k1s);
+  var conn = await getDatabaseConnection(mysqlObj);
+  var k1ImuidsMap = await getDataFromDatabase(mysqlObj, conn, k1s);
 
   // time consuming step - 2
   await createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map);
 
   createK1CleanDocuments(k1s);
 
+  var word_doc_freq_map_mz = {};
   var doc_word_freq_map = {};
   var word_doc_freq_map = {};
 
-  createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map);
+  var globalDocCount = createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq_map_mz);
+  console.log("Global doc count: " + globalDocCount);
 
-  //createWeightsFiles(doc_word_freq_map, word_doc_freq_map);
+  var dfFileMz = fs.openSync('doc_freq_mz', 'a');
+  var distinct_words = Object.keys(word_doc_freq_map_mz);
+  distinct_words = distinct_words.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+  for (var wd of distinct_words) {
+    fs.writeFileSync(dfFileMz, wd + '\t' + word_doc_freq_map_mz[wd] + '\n');
+  }
+  fs.closeSync(dfFileMz);
+
+  await createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map_mz, globalDocCount); // rplaced with MZ's doc freq map
 
   var json_obj = {k1_count : k1s.length};
   res.send(JSON.stringify(json_obj));

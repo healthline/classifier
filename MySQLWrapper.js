@@ -190,6 +190,34 @@ class MySQLWrapper {
     }
     return imuids;
   }
+
+  async deleteWeightsForK1(conn, k1) {
+    return new Promise(function(resolve, reject) {
+      var query = 'delete from santosh_classifier_weights where k1 = "' + k1 + '"';
+      //console.log(query);
+      conn.query(query, function (error, rows) {
+        if (error) {
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+  }
+
+  async insertWeightForK1Term(conn, k1, term, weight) {
+    return new Promise(function(resolve, reject) {
+      var query = 'insert into santosh_classifier_weights (k1, term, weight) values ("' + k1 + '", "' + term + '", ' + weight + ')';
+      //console.log(query);
+      conn.query(query, function (error, rows) {
+        if (error) {
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+  }
 };
 
 module.exports = MySQLWrapper;
