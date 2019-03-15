@@ -125,9 +125,7 @@ class MySQLWrapper {
 
   getK1WeightsHelper(conn, k1value) {
     return new Promise(function(resolve, reject) {
-      //var query = 'select term, weight from classifier_weights where k1="' + k1value + '"';
       var query = 'select k1, term, weight from classifier_weights where k1 in ' + k1value;
-      //console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
           reject( error);
@@ -169,7 +167,6 @@ class MySQLWrapper {
   getImuidsHelper(conn, k1value) {
     return new Promise(function(resolve, reject) {
       var query = 'select distinct tax_imuid from tax_imuid_k1_copy where k1_value = "' + k1value + '"';
-      //console.log(query);
       conn.query(query, function (error, rows) {
         if (error) {
           reject( error);
@@ -193,8 +190,7 @@ class MySQLWrapper {
 
   async deleteWeightsForK1(conn, k1) {
     return new Promise(function(resolve, reject) {
-      var query = 'delete from santosh_classifier_weights where k1 = "' + k1 + '"';
-      //console.log(query);
+      var query = 'delete from classifier_weights where k1 = "' + k1 + '"';
       conn.query(query, function (error, rows) {
         if (error) {
           resolve(false);
@@ -206,7 +202,7 @@ class MySQLWrapper {
   }
 
   async insertWeightForK1(conn, k1, weights) {
-    var insertQuery = 'insert into santosh_classifier_weights (k1, term, weight) values ';
+    var insertQuery = 'insert into classifier_weights (k1, term, weight) values ';
     var terms = Object.keys(weights);
     var num = terms.length;
     if (num < 1) {
@@ -218,6 +214,7 @@ class MySQLWrapper {
         insertQuery += ',';
       }
     }
+
     return new Promise(function(resolve, reject) {
       conn.query(insertQuery, function (error, rows) {
         if (error) {

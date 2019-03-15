@@ -109,10 +109,11 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
   var counter = 0;
   for (const k1 of k1s) {
     if (fs.existsSync('super_docs/' + k1)) {
-      //console.log('super_doc for ' + k1 + ' exists');
+      console.log('super_doc for ' + k1 + ' exists - skipping');
       continue;
     }
     counter++;
+    //var json_files = fs.openSync('json_files_processed/' + k1, 'a');
     var k1_super_doc = fs.openSync('super_docs/' + k1, 'a');
     var k1_imuids = k1ImuidsMap[k1];
     console.log('+++ processing +++ ' + k1);
@@ -121,7 +122,6 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
     var urlcnt = 0;
     for (var u=0; u<urls.length; u++) {
       var temp_url = urls[u];
-      //console.log(temp_url);
       var this_url_imuids = url_imuids_map[temp_url];
 
       var found_first = false;
@@ -152,18 +152,22 @@ async function createK1SuperDocumentsFromS3(k1s, k1ImuidsMap, url_imuids_map) {
         console.log('null content for ' + urls[u]);
         continue;
       }
+      //fs.writeFileSync(json_files, urls[u] + '\n');
       var body = obj['Body'];
       var articleJson = JSON.parse(body);
       var articleTitle = articleJson['title'];
+      if (articleTitle.indexOf("QA") > -1) {
+        continue;
+      }
       var title3Times = articleTitle + ' ' + articleTitle + ' ' + articleTitle + ' ';
       var articleBody = title3Times + articleJson['body'];
       var oneLineArticleBody = articleBody.replace(/[\r\n]+/g, " ").replace('&nbsp;', ' ').replace('&hellip;', ' ').replace('&amp;', '&');
-      //console.log(urls[u]);
       fs.writeFileSync(k1_super_doc, oneLineArticleBody + '\n');
       urlcnt += 1;
     }
 
     fs.closeSync(k1_super_doc);
+    //fs.closeSync(json_files);
     var stat = k1 + '--' + urlcnt + '\n';
     fs.writeFileSync(outfile, stat);
   }
@@ -185,12 +189,8 @@ function createK1CleanDocuments(k1s) {
     input_content = input_content.toString();
     fs.closeSync(input_file);
 
-    //console.log('creating noscript doc for ' + k1);
-    //var output_file1 = fs.openSync('noscript_super_docs/'+k1, 'w');
     input_content = input_content.toLowerCase().replace(/<script[^>]*>.*?<\/script>/g, '');
     input_content = input_content.replace(/<!\-\-.*?\-\->/g, '');
-    //fs.writeFileSync(output_file1, input_content);
-    //fs.closeSync(output_file1);
 
     var input_lines = input_content.split("\n");
 
@@ -201,14 +201,13 @@ function createK1CleanDocuments(k1s) {
     for (var input_line of input_lines) {
       linecount++;
       console.log(linecount + ": " + input_line.substring(0, 10));
-      //var content = input_content.replace(/[\:’]/g, "").replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\"\',\.\(\)\[\]\?“”]/g, "");
       var content = input_line.replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\(\)]/g, '').replace(/&nbsp;/g, ' ').replace(/&hellip;/g, ' ').replace(/&#8217;/g, '\'').replace(/&amp;/g, '&');
       var content = content.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "");
       var toks = content.split(' ');
       var clean_content = '';
       for (var w=0; w<toks.length; w++) {
         var wd = toks[w];
-        if (!isNaN(wd) || wd.length < 3) {
+        if ((!isNaN(wd) || wd.length < 3) && !(wd == "ms" || wd == "ed")) {
           continue;
         }
         var wdlen = wd.length;
@@ -318,13 +317,13 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq
 
     doc_word_freq_map[k1] = distinct_word_map;
 
-    var tmp2 = Object.keys(distinct_word_map);
-    var tmp2 = tmp2.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
-    var words_file = fs.openSync('k1_words/'+k1, 'a');
-    for (var wd of tmp2) {
-      fs.writeFileSync(words_file, wd + '\n');
-    }
-    fs.closeSync(words_file);
+    //var tmp2 = Object.keys(distinct_word_map);
+    //var tmp2 = tmp2.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+    //var words_file = fs.openSync('k1_words/'+k1, 'a');
+    //for (var wd of tmp2) {
+    //  fs.writeFileSync(words_file, wd + '\n');
+    //}
+    //fs.closeSync(words_file);
 
     var distinct_words = Object.keys(distinct_word_map);
     for (var dword of distinct_words) {
@@ -337,35 +336,39 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq
 
     total_distinct_word_count += distinct_words.length;
   }
+
   console.log("Total distinct words: " + total_distinct_word_count);
   return global_doc_count;
 }
 
 async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map, globalDocCount) {
 
-  var exisitng_weights = {};
+  //await mysqlObj.deleteWeightsForK1(conn, "idf");
+  console.log('writing weights to file for ' + thisK1);
 
   var WEIGHT_THRESHOLD = 0.003;
   var docKeys = Object.keys(doc_word_freq_map);
-  var numDocs = globalDocCount*3;//docKeys.length;
+  var numDocs = globalDocCount*3;
   for (var thisK1 of docKeys) {
-    if (exisitng_weights.hasOwnProperty(thisK1)) {
-      continue;
-    }
     console.log('calculating weights for ' + thisK1);
     var word_weights_map = {};
+    var thisIdfMap = {};
     var word_freq_map = doc_word_freq_map[thisK1];
     var words1 = Object.keys(word_freq_map);
     var sorted_words1 = words1.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
     var total_distance_squared = 0.0;
     var wdcntr = 0;
     for (var word of sorted_words1) {
-
       var tf = word_freq_map[word];
       var idf = 1;
       var df = word_doc_freq_map[word];
       if (word_doc_freq_map.hasOwnProperty(word)) {
         idf = (Math.log10((numDocs/df), 10)).toFixed(4);
+        thisIdfMap[word] = idf;
+        if (wdcntr>0 && wdcntr%1000 == 0) {
+          //await mysqlObj.insertWeightForK1(conn, "idf", thisIdfMap);
+          thisIdfMap = {};
+        }
       }
       var word_weight = tf * idf;
       wdcntr++;
@@ -374,15 +377,14 @@ async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_fr
       }
       total_distance_squared += word_weight * word_weight;
 
-      word_weights_map[word] = [df, idf, word_weight];
+      word_weights_map[word] = [tf, df, word_weight];
     }
+    //await mysqlObj.insertWeightForK1(conn, "idf", thisIdfMap); // remaining ones
     var total_distance = Math.sqrt(total_distance_squared);
 
-    await mysqlObj.deleteWeightsForK1(conn, thisK1);
-    console.log('writing weights to file for ' + thisK1);
+    //await mysqlObj.deleteWeightsForK1(conn, thisK1);
 
     var normalized_weights = {};
-    //var tf_idf_doc_debug = fs.openSync('tf_idf_docs/' + thisK1 + '_debug', "a");
     var words2 = Object.keys(word_weights_map);
     var sorted_words2 = words2.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
     for (var wd of sorted_words2) {
@@ -392,23 +394,18 @@ async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_fr
         continue;
       }
       normalized_weights[wd] = wt.toFixed(4);
-
-      //var df = word_weights_map[wd][0];
-      //var idf = word_weights_map[wd][1];
-
-      //var line = wd + '\t' + tf + '\t' + df + '\t' + idf + '\t' + normalized_weights[wd] + '\n';
-      //fs.writeFileSync(tf_idf_doc_debug, line);
     }
-    //fs.closeSync(tf_idf_doc_debug);
     console.log(thisK1 + ', word_count: ' + Object.keys(word_weights_map).length + ', word_count_above_threshold: ' + Object.keys(normalized_weights).length);
 
-    await mysqlObj.insertWeightForK1(conn, thisK1, normalized_weights);
+    //await mysqlObj.insertWeightForK1(conn, thisK1, normalized_weights);
 
-    var tf_idf_doc = fs.openSync('tf_idf_docs/' + thisK1, "a");
-    for (var wd of Object.keys(normalized_weights)) {
-      fs.writeFileSync(tf_idf_doc, wd + '\t' + normalized_weights[wd] + '\n');
-    }
-    fs.closeSync(tf_idf_doc);
+    //var tf_idf_doc = fs.openSync('tf_idf_docs/' + thisK1, "a");
+    //for (var wd of Object.keys(normalized_weights)) {
+    //  var tf = word_weights_map[wd][0];
+    //  var df = word_weights_map[wd][1];
+    //  fs.writeFileSync(tf_idf_doc, wd + '\t' + tf + '\t' + df + '\t' + normalized_weights[wd] + '\n');
+    //}
+    //fs.closeSync(tf_idf_doc);
   }
 }
 
@@ -434,16 +431,16 @@ router.get('/', async function(req, res, next) {
 
   // cleanup result directories
   //rimraf.sync('./super_docs');
-  rimraf.sync('./noscript_super_docs');
-  rimraf.sync('./clean_super_docs');
-  rimraf.sync('./tf_idf_docs');
-  rimraf.sync('./k1_words');
+  //rimraf.sync('./noscript_super_docs');
+  //rimraf.sync('./clean_super_docs');
+  //rimraf.sync('./tf_idf_docs');
+  //rimraf.sync('./k1_words');
 
   //fs.mkdirSync('./super_docs');
-  fs.mkdirSync('./noscript_super_docs');
-  fs.mkdirSync('./clean_super_docs');
-  fs.mkdirSync('./tf_idf_docs');
-  fs.mkdirSync('./k1_words');
+  //fs.mkdirSync('./noscript_super_docs');
+  //fs.mkdirSync('./clean_super_docs');
+  //fs.mkdirSync('./tf_idf_docs');
+  //fs.mkdirSync('./k1_words');
 
   // time consuming step - 1
   if (!fs.existsSync('url_imuids_map')) {
@@ -472,14 +469,6 @@ router.get('/', async function(req, res, next) {
 
   var globalDocCount = createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq_map_mz);
   console.log("Global doc count: " + globalDocCount);
-
-  var dfFileMz = fs.openSync('doc_freq_mz', 'a');
-  var distinct_words = Object.keys(word_doc_freq_map_mz);
-  distinct_words = distinct_words.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
-  for (var wd of distinct_words) {
-    fs.writeFileSync(dfFileMz, wd + '\t' + word_doc_freq_map_mz[wd] + '\n');
-  }
-  fs.closeSync(dfFileMz);
 
   await createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map_mz, globalDocCount); // rplaced with MZ's doc freq map
 

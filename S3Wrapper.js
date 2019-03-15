@@ -17,9 +17,6 @@ class S3Wrapper {
     var loop = 0;
 
     while (true) {
-
-      console.log('loop: ' + loop);
-
       resp = await new Promise( function( resolve, reject ) {
         s3.listObjectsV2(params, function (err, data) {
           if (err) {
@@ -36,7 +33,7 @@ class S3Wrapper {
         var nameOnly = name.substring(pos+1);
         var pos1 = nameOnly.lastIndexOf('-');
         var tok = nameOnly.substring(pos1+1).replace(/\.json/, '');
-        if (!isNaN(tok) || name.indexOf(contentType+'/'+contentType+'-') == -1) {
+        if ((!isNaN(tok) && nameOnly == contentType+'-'+tok+'.json') || name.indexOf(contentType+'/'+contentType+'-') == -1) {
           continue;
         }
         if (i%100 == 0) {
@@ -73,11 +70,10 @@ class S3Wrapper {
     await this.createImuidUrlMapPerContentType(imuid_url_map, "healthfeature");
     await this.createImuidUrlMapPerContentType(imuid_url_map, "authoritynutrition");
     await this.createImuidUrlMapPerContentType(imuid_url_map, "newsarticles");
-    await this.createImuidUrlMapPerContentType(imuid_url_map, "sponsoredprogram");
     await this.createImuidUrlMapPerContentType(imuid_url_map, "partner_article");
 
     var respStr = JSON.stringify(imuid_url_map);
-    var outFile = fs.openSync('imuid_url_map', 'a');
+    var outFile = fs.openSync('url_imuids_map', 'a');
     fs.writeFileSync(outFile, respStr);
     fs.closeSync(outFile);
 
@@ -102,8 +98,6 @@ class S3Wrapper {
     } else if (first == 'diabetesmine') {
       newUrl = modUrl.replace('/', '__');
       return ('partner_article/partner_article-' + newUrl);
-    } else if (first == 'program') {
-      return ('sponsoredprogram/sponsoredprogram-' + newUrl);
     }
     return '';
   }
