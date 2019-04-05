@@ -12,6 +12,36 @@ var distinct_k1s = [];
 var k1_primary_thresholds = {};
 var k1_related_thresholds = {};
 
+router.get('/report', async function(req, res, next) {
+  req.setTimeout(0);
+
+  var infile = fs.openSync('andrew_test.txt', 'r');
+  var infiles = fs.readFileSync(infile, 'utf-8');
+  var urlList = infiles.split('\n');
+  fs.closeSync(infile);
+
+  var outfile = fs.openSync('sh_nonk1_result.txt', 'a');
+  for (var url of urlList) {
+    var cleanUrl = url.trim();
+    var results = await classifyArticleForNonK1(cleanUrl, 'get');
+    console.log(JSON.stringify(results));
+    if (results.length == 0) {
+      fs.writeFileSync(outfile, cleanUrl+'\t'+'-'+'\n');
+    } else {
+      var primary = results.primary[0];
+      if (typeof primary == 'undefined') {
+        fs.writeFileSync(outfile, cleanUrl+'\t'+'-'+'\n');
+      } else {
+        fs.writeFileSync(outfile, cleanUrl+'\t'+primary['prototype_title']+'\n');
+      }
+    }
+  }
+  fs.closeSync(outfile);
+  
+  res.status(200).send('done');
+});
+
+
 router.get('/', async function(req, res, next) {
   req.setTimeout(0);
   var results = await classifyArticle(req, 'get');
@@ -157,7 +187,10 @@ async function classifyArticle(req, methodType) {
 }
 
 function getResult(k1, word_map, normalizedDocVector, prototypeIds, closest) {
-  var prototypeId = prototypeIds[k1];
+  var prototypeId = "";
+  if (prototypeIds.length > 0) {
+    prototypeId = prototypeIds[k1];
+  }
 
   var normalizedWeights = word_map;
   var result = computeDotProduct(k1, prototypeId, normalizedDocVector, normalizedWeights);
@@ -176,19 +209,20 @@ function getResult(k1, word_map, normalizedDocVector, prototypeIds, closest) {
 
 function fillPrimaryRelated(closest, primary, related) {
 
-    var distances;
     var firstBreak = 0.0;
     var secondBreak = 0.0;
     var firstIndex = 0;
     var secondIndex = 0;
-    for(var i = 0; i < closest.length && i < 10; i++) {
+    var maxClosest = (closest.length < 10 ? closest.length : 10);
+    for(var i = 0; i < closest.length && i < maxClosest-1; i++) {
       var thisBreak = closest[i].distance - closest[i+1].distance;
       if(thisBreak > firstBreak) {
         firstBreak = thisBreak;
         firstIndex = i;
       }
     }
-    for(var i = firstIndex + 1; i <  closest.length && i < 15; i++) {
+    maxClosest = (closest.length < 15 ? closest.length : 15);
+    for(var i = firstIndex + 1; i < closest.length && i < maxClosest-1; i++) {
       var thisBreak = closest[i].distance - closest[i+1].distance;
       if(thisBreak > secondBreak) {
         secondBreak = thisBreak;
@@ -378,6 +412,85 @@ async function getContentFromS3(url) {
     console.log(ex);
   }
   return jsonObj;
+}
+
+async function classifyArticleForNonK1(url, methodType) {
+  var finalResult = new FinalResult();
+  var closest = [];
+  var primary = [];
+  var related = [];
+  var jsonObj;
+
+  if (methodType == 'post') {
+    jsonObj = req;
+  } else {
+    console.log('Url to classify: ' + url);
+    var jsonObj = await getContentFromS3(url);
+    if (Object.keys(jsonObj).length == 0) {
+      return [];
+    }
+  }
+
+  var docVector = parseContentBody(jsonObj);
+  var normalizedDocVector = normalizeVector(docVector);
+
+  var mysqlObj = new MySQLWrapper();
+  var config_path = 'config/database.cf.dev';
+  var configJson = mysqlObj.getDatabaseConfig(config_path);
+  var conn = await mysqlObj.getConnection(configJson);
+  if (conn == null) {
+    return [];
+  }
+
+  var k1s = ["postpartum_depression", "postpartum_anxiety", "mental_health_during_pregnancy", "pregnancy_nutrition", "postpartum_nutrition"];
+  
+  var k1_str = '(';
+  for (const k1 of k1s) {
+    k1_str += '"' + k1 + '",';
+  }
+
+  var k1s_len = k1_str.length;
+  k1_str = k1_str.substring(0, k1s_len-1);
+  k1_str += ')';
+  var k1_weights = await mysqlObj.getNonK1Weights(conn, k1_str);
+
+  var db_keys = Object.keys(k1_weights);
+  db_keys = db_keys.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+  var num_keys = db_keys.length;
+  var cur_map = {};
+  for (var k=0; k<num_keys; k++) {
+    if (k > 0 && k%100 == 0) {
+      file_num++;
+      cur_map = {};
+      cur_map[db_keys[k]] = k1_weights[db_keys[k]];
+    } else {
+      cur_map[db_keys[k]] = k1_weights[db_keys[k]];
+    }
+  }
+
+  for (const k1 of k1s) {
+    var word_map = k1_weights[k1];
+    getResult(k1, word_map, normalizedDocVector, [], closest);
+  }
+
+  await mysqlObj.closeConnect(conn);
+
+  var sortedClosest = closest.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
+
+  if(closest[0].distance == 0.0) {
+    closest.pop();
+    finalResult.primary = primary;
+    finalResult.related = related;
+    return finalResult;
+  }
+  var index = fillPrimaryRelated(closest, primary, related);
+  primary.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
+  related.sort((a, b) => (a.distance < b.distance) ? 1 : ((a.distance > b.distance) ? -1 : 0));
+  finalResult.closest = sortedClosest.slice(index + 1, index + 6);
+  finalResult.primary = primary;
+  finalResult.related = related;
+
+  return finalResult;
 }
 
 module.exports = router;

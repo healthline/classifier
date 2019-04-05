@@ -113,15 +113,15 @@ class S3Wrapper {
     var bucketName = 'hl-json-data-prod';
 
     var key = 'data/hlcmsresource/articles/' + newUrl + '.json';
+    console.log(key);
     var params = {Bucket: bucketName, Key: key};
-    var fileObj = null;
-    var done = false;
 
     return new Promise( function( resolve, reject ) {
       s3.getObject(params, function (err, data) {
         if (err) {
           resolve(null);
         } else {
+          console.log('s3 fetch success');
           resolve( data );
         }
       });

@@ -344,7 +344,6 @@ function createTfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq
 async function createWeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map, globalDocCount) {
 
   //await mysqlObj.deleteWeightsForK1(conn, "idf");
-  console.log('writing weights to file for ' + thisK1);
 
   var WEIGHT_THRESHOLD = 0.003;
   var docKeys = Object.keys(doc_word_freq_map);
@@ -492,5 +491,317 @@ function removeStopWords(clean_body) {
   }
   return new_body_words;
 }
+
+async function createNonK1Prototypes(category_files_map) {
+
+  var cats = Object.keys(category_files_map);
+  await createNonK1SuperDocumentsFromS3(cats, category_files_map);
+}
+
+async function createNonK1SuperDocumentsFromS3(cats, catFileMap) {
+  var s3 = new S3Wrapper();
+  for (const k1 of cats) {
+    if (fs.existsSync('nonk1_super_docs/' + k1)) {
+      console.log('nonk1_super_doc for ' + k1 + ' exists - skipping');
+      continue;
+    }
+    counter++;
+    var k1_super_doc = fs.openSync('nonk1_super_docs/' + k1, 'a');
+    console.log('+++ processing +++ ' + k1);
+
+    var urls = catFileMap[k1];
+    var urlcnt = 0;
+    for (var u=0; u<urls.length; u++) {
+      var temp_url = urls[u];
+
+      var contentType = '';
+      if (temp_url.indexOf("healthfeature") > -1) {
+        contentType = "healthfeature";
+      } else if (temp_url.indexOf("authoritynutrition") > -1) {
+        contentType = "authoritynutrition";
+      } else if (temp_url.indexOf("newsarticles") > -1) {
+        contentType = "newsarticles";
+      } else if (temp_url.indexOf("partner_article") > -1) {
+        contentType = "partner_article";
+      }
+      var obj = await s3.getS3Data(urls[u], contentType);
+      num_files += 1;
+      if (obj == null) {
+        console.log('null content for ' + urls[u]);
+        continue;
+      }
+      var body = obj['Body'];
+      var articleJson = JSON.parse(body);
+      var articleTitle = articleJson['title'];
+      if (articleTitle.indexOf("QA") > -1) {
+        continue;
+      }
+      var title3Times = articleTitle + ' ' + articleTitle + ' ' + articleTitle + ' ';
+      var articleBody = title3Times + articleJson['body'];
+      var oneLineArticleBody = articleBody.replace(/[\r\n]+/g, " ").replace('&nbsp;', ' ').replace('&hellip;', ' ').replace('&amp;', '&');
+      fs.writeFileSync(k1_super_doc, oneLineArticleBody + '\n');
+      urlcnt += 1;
+    }
+
+    fs.closeSync(k1_super_doc);
+    var stat = k1 + '--' + urlcnt + '\n';
+    console.log(stat);
+  }
+}
+
+function createNonK1CleanDocuments(nonK1s) {
+  var counter = 0;
+  for (const k1 of nonK1s) {
+    if (fs.existsSync('nonk1_clean_super_docs/'+k1)) {
+      console.log('clean superdoc for ' + k1 + ' exists');
+      continue;
+    }
+    counter++;
+    console.log('processing ' + k1);
+
+    var input_file = fs.openSync('nonk1_super_docs/'+k1, 'r');
+    var input_content = fs.readFileSync(input_file);
+    input_content = input_content.toString();
+    fs.closeSync(input_file);
+
+    input_content = input_content.toLowerCase().replace(/<script[^>]*>.*?<\/script>/g, '');
+    input_content = input_content.replace(/<!\-\-.*?\-\->/g, '');
+
+    var input_lines = input_content.split("\n");
+
+    console.log('creating clean superdoc for ' + k1);
+    var output_file = fs.openSync('nonk1_clean_super_docs/'+k1, 'a');
+
+    var linecount = 0;
+    for (var input_line of input_lines) {
+      linecount++;
+      console.log(linecount + ": " + input_line.substring(0, 10));
+      var content = input_line.replace(/<\/?[^>]+>/g, " ").replace(/\s+/g, " ").replace(/[\(\)]/g, '').replace(/&nbsp;/g, ' ').replace(/&hellip;/g, ' ').replace(/&#8217;/g, '\'').replace(/&amp;/g, '&');
+      var content = content.replace(/[“”\[\]’>&\/…‘~',\.()!?\"\':;%*\-]/g, "");
+      var toks = content.split(' ');
+      var clean_content = '';
+      for (var w=0; w<toks.length; w++) {
+        var wd = toks[w];
+        if ((!isNaN(wd) || wd.length < 3) && !(wd == "ms" || wd == "ed")) {
+          continue;
+        }
+        var wdlen = wd.length;
+        var firststr = wd.substring(0,1);
+        var laststr = wd.substring(wdlen-1);
+        if (!laststr.match(/^[0-9a-zA-Z]+/)) {
+          wd = wd.substring(0, wdlen-1);
+        }
+        if (!firststr.match(/^[0-9a-zA-Z]+/)) {
+          wd = wd.substring(1);
+        }
+
+        var fullmatch = true;
+        for (var l=0; l<wd.length; l++) {
+          var tmp = wd.substring(l, l+1);
+          if (!tmp.match(/[\W0-9]+/)) {
+            fullmatch = false;
+            break;
+          }
+        }
+        if (fullmatch) {
+          continue;
+        }
+        if (wd.match(/[°]+/)) {
+          continue;
+        }
+
+        clean_content = clean_content + ' ' + wd;
+      }
+      fs.writeFileSync(output_file, clean_content + '\n');
+    }
+    fs.closeSync(output_file);
+  }
+}
+
+function createNonk1TfDfMaps(k1s, doc_word_freq_map, word_doc_freq_map, word_doc_freq_map_mz) {
+  var counter = 0;
+  var global_doc_count = 0;
+  var total_distinct_word_count = 0;
+  for (const k1 of k1s) {
+    counter++;
+    doc_word_freq_map[k1] = {};
+
+    console.log('processing ' + k1);
+
+    var input_file = fs.openSync('nonk1_clean_super_docs/'+k1, 'r');
+    var input_content = fs.readFileSync(input_file);
+    input_content = input_content.toString().toLowerCase();
+    fs.closeSync(input_file);
+
+    var input_lines = input_content.split("\n");
+    var distinct_word_map = {};
+    var linecount = 0;
+    for (var input_line of input_lines) {
+      global_doc_count++;
+      linecount++;
+      var this_doc_word_map = {};
+      var toks = removeStopWords(input_line);
+
+      var prevWord = '';
+      for (var tk of toks) {
+        if (!this_doc_word_map.hasOwnProperty(tk)) {
+          this_doc_word_map[tk] = 1;
+        } else {
+          this_doc_word_map[tk] += 1;
+        }
+        if (tk == prevWord) {
+          continue;
+        }
+        prevWord = tk;
+      }
+
+      var bigrams = [];
+      for (var w=0; w<toks.length-1; w++) {
+        var bigram = toks[w] + "_" + toks[w+1];
+        bigrams.push(bigram);
+        this_doc_word_map[bigram] = 1;
+      }
+
+      for (var w=0; w<toks.length; w++) {
+        if (!distinct_word_map.hasOwnProperty(toks[w])) {
+          distinct_word_map[toks[w]] = 1;
+        } else {
+          var freq = distinct_word_map[toks[w]];
+          distinct_word_map[toks[w]] = freq+1;
+        }
+      }
+
+      for (var w=0; w<bigrams.length; w++) {
+        if (!distinct_word_map.hasOwnProperty(bigrams[w])) {
+          distinct_word_map[bigrams[w]] = 1;
+        } else {
+          var freq = distinct_word_map[bigrams[w]];
+          distinct_word_map[bigrams[w]] = freq+1;
+        }
+      }
+
+      var this_doc_distinct_words = Object.keys(this_doc_word_map);
+      for (var dword of this_doc_distinct_words) {
+        if (word_doc_freq_map_mz.hasOwnProperty(dword)) {
+          word_doc_freq_map_mz[dword] += this_doc_word_map[dword];
+        } else {
+          word_doc_freq_map_mz[dword] = this_doc_word_map[dword];
+        }
+      }
+    }
+
+    doc_word_freq_map[k1] = distinct_word_map;
+
+    var distinct_words = Object.keys(distinct_word_map);
+    for (var dword of distinct_words) {
+      if (word_doc_freq_map.hasOwnProperty(dword)) {
+        word_doc_freq_map[dword] += 1;
+      } else {
+        word_doc_freq_map[dword] = 1;
+      }
+    }
+
+    total_distinct_word_count += distinct_words.length;
+  }
+
+  console.log("Total distinct words: " + total_distinct_word_count);
+  return global_doc_count;
+}
+
+async function createNonK1WeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map, globalDocCount) {
+
+  await mysqlObj.deleteWeightsForNonK1(conn, "idf");
+
+  var WEIGHT_THRESHOLD = 0.003;
+  var docKeys = Object.keys(doc_word_freq_map);
+  var numDocs = globalDocCount*3;
+  for (var thisK1 of docKeys) {
+    console.log('calculating weights for ' + thisK1);
+    var word_weights_map = {};
+    var thisIdfMap = {};
+    var word_freq_map = doc_word_freq_map[thisK1];
+    var words1 = Object.keys(word_freq_map);
+    var sorted_words1 = words1.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+    var total_distance_squared = 0.0;
+    var wdcntr = 0;
+    for (var word of sorted_words1) {
+      var tf = word_freq_map[word];
+      var idf = 1;
+      var df = word_doc_freq_map[word];
+      if (word_doc_freq_map.hasOwnProperty(word)) {
+        idf = (Math.log10((numDocs/df), 10)).toFixed(4);
+        thisIdfMap[word] = idf;
+        if (wdcntr>0 && wdcntr%1000 == 0) {
+          await mysqlObj.insertWeightForNonK1(conn, "idf", thisIdfMap);
+          thisIdfMap = {};
+        }
+      }
+      var word_weight = tf * idf;
+      wdcntr++;
+      if (word_weight < WEIGHT_THRESHOLD) {
+        continue;
+      }
+      total_distance_squared += word_weight * word_weight;
+
+      word_weights_map[word] = [tf, df, word_weight];
+    }
+    await mysqlObj.insertWeightForNonK1(conn, "idf", thisIdfMap); // remaining ones
+    var total_distance = Math.sqrt(total_distance_squared);
+
+    await mysqlObj.deleteWeightsForNonK1(conn, thisK1);
+
+    var normalized_weights = {};
+    var words2 = Object.keys(word_weights_map);
+    var sorted_words2 = words2.sort((a, b) => (a > b) ? 1 : ((a < b) ? -1 : 0));
+    for (var wd of sorted_words2) {
+      var wt = (word_weights_map[wd][2]/total_distance);
+      wt = parseFloat(wt);
+      if (wt < WEIGHT_THRESHOLD) {
+        continue;
+      }
+      normalized_weights[wd] = wt.toFixed(4);
+    }
+    console.log(thisK1 + ', word_count: ' + Object.keys(word_weights_map).length + ', word_count_above_threshold: ' + Object.keys(normalized_weights).length);
+
+    await mysqlObj.insertWeightForNonK1(conn, thisK1, normalized_weights);
+  }
+}
+
+router.get('/report', async function(req, res, next) {
+  req.setTimeout(0);
+
+  rimraf.sync('./nonk1_super_docs');
+  rimraf.sync('./nonk1_clean_super_docs');
+
+  fs.mkdirSync('./nonk1_super_docs');
+  fs.mkdirSync('./nonk1_clean_super_docs');
+
+  var category_files_map = {
+    "postpartum_depression":["healthfeature-depression__postpartum-depression.json","healthfeature-depression__how-to-deal-with-postpartum-depression.json","newsarticles-does-painful-childbirth-increase-post-partum-depression-risk.json","newsarticles-children-suffer-when-mothers-have-postpartum-depression.json","healthfeature-postpartum-depression__importance-of-maternal-mental-health.json","healthfeature-depression__ivanka-trump-postpartum-depression.json","healthfeature-depression__best-postpartum-depression-blogs.json","newsarticles-why-women-may-need-to-read-this-disclaimer-before-seeing-tully.json","healthfeature-postpartum-depression__lessons-learn-as-new-mom.json","newsarticles-mental-what-women-should-know-about-postpartum-depression-111913.json"],
+    "postpartum_anxiety":["healthfeature-pregnancy__i-tried-therapy-app-postpartum-anxiety.json","healthfeature-depression__postpartum-depression.json","healthfeature-pregnancy__i-had-postpartum-anxiety.json","healthfeature-postpartum-depression__lessons-learn-as-new-mom.json","healthfeature-pregnancy__i-had-postpartum-anxiety.json","healthfeature-parenting__motherhood-and-anxiety.json"],
+    "mental_health_during_pregnancy":["healthfeature-pregnancy__anxiety-coping-tips.json","newsarticles-what-parents-should-know-about-postpatrum-and-peripartum-treatment.json","newsarticles-women-depression-during-pregnancy-increases-childs-risk-of-mood-disorders-100913.json","healthfeature-perinatal-depression-is-depression-during-pregnancy-and-its-real.json","healthfeature-perinatal-depression-is-depression-during-pregnancy-and-its-real.json"],
+    "pregnancy_nutrition":["healthfeature-pregnancy__diet-nutrition.json","authoritynutrition-13-foods-to-eat-when-pregnant.json","authoritynutrition-11-foods-to-avoid-during-pregnancy.json","healthfeature-pregnancy__nutrition.json","healthfeature-pregnancy__second-trimester-diet-nutrition.json","healthfeature-food-safety-pregnancy.json","healthfeature-pregnancy__best-fruits-to-eat.json","healthfeature-pregnancy__crab-and-seafood.json","healthfeature-baby__pregnancy-myths.json","authoritynutrition-supplements-during-pregnancy.json","healthfeature-pregnancy__gestational-diabetes-food-list.json","healthfeature-pregnancy__paleo-diet.json","healthfeature-pregnancy__food-aversions.json","authoritynutrition-foods-high-in-folate-folic-acid.json"],
+    "postpartum_nutrition":["authoritynutrition-breastfeeding-diet-101.json","authoritynutrition-breastfeeding-and-weight-loss.json","healthfeature-parenting__lactation-boosting-recipes.json","healthfeature-eating-healthy-as-new-parent.json","healthfeature-pregnancy__nourishing-soups-postpartum.json","authoritynutrition-weight-loss-after-pregnancy.json","newsarticles-are-placenta-pills-safe-for-your-baby.json","newsarticles-heres-how-vitamin-d-supplements-can-help-new-moms.json"]
+  }
+
+  await createNonK1Prototypes(category_files_map);
+
+  var cats = Object.keys(category_files_map);
+
+  createNonK1CleanDocuments(cats);
+
+  var mysqlObj = new MySQLWrapper();
+  var conn = await getDatabaseConnection(mysqlObj);
+  var word_doc_freq_map_mz = {};
+  var doc_word_freq_map = {};
+  var word_doc_freq_map = {};
+
+  var globalDocCount = createNonk1TfDfMaps(cats, doc_word_freq_map, word_doc_freq_map, word_doc_freq_map_mz);
+  console.log("Global doc count: " + globalDocCount);
+
+  await createNonK1WeightsFiles(mysqlObj, conn, doc_word_freq_map, word_doc_freq_map_mz, globalDocCount);
+
+  res.send(JSON.stringify({done: true}));
+});
 
 module.exports = router;

@@ -226,6 +226,74 @@ class MySQLWrapper {
       });
     });
   }
+
+  async deleteWeightsForNonK1(conn, k1) {
+    return new Promise(function(resolve, reject) {
+      var query = 'delete from classifier_weights_andrew where k1 = "' + k1 + '"';
+      conn.query(query, function (error, rows) {
+        if (error) {
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+  }
+
+  async insertWeightForNonK1(conn, k1, weights) {
+    var insertQuery = 'insert into classifier_weights_andrew (k1, term, weight) values ';
+    var terms = Object.keys(weights);
+    var num = terms.length;
+    if (num < 1) {
+      return true;
+    }
+    for (var k=0; k<num; k++) {
+      insertQuery += '("' + k1 + '","' + terms[k] + '",' + weights[terms[k]]+ ')';
+      if (k < num-1) {
+        insertQuery += ',';
+      }
+    }
+
+    return new Promise(function(resolve, reject) {
+      conn.query(insertQuery, function (error, rows) {
+        if (error) {
+          console.log(error);
+          resolve(false);
+        } else {
+          resolve(true);
+        }
+      });
+    });
+  }
+
+  async getNonK1Weights(conn, k1s_str) {
+    var rows = await this.getNonK1WeightsHelper(conn, k1s_str);
+    var k1_weights = {};
+    for (var i=0; i<rows.length; i++) {
+      var k1_col = rows[i]['k1'];
+      var term = rows[i]['term'].replace(/\\\"/g, "");
+      var weight = rows[i]['weight'];
+      if (!k1_weights.hasOwnProperty(k1_col)) {
+        k1_weights[k1_col] = {};
+      }
+      k1_weights[k1_col][term] = weight;
+    }
+    return k1_weights;
+  }
+
+  getNonK1WeightsHelper(conn, k1value) {
+    return new Promise(function(resolve, reject) {
+      var query = 'select k1, term, weight from classifier_weights_andrew where k1 in ' + k1value;
+      conn.query(query, function (error, rows) {
+        if (error) {
+          reject( error);
+          console.log(error);
+          return {};
+        }
+        resolve(rows);
+      });
+    });
+  }
 };
 
 module.exports = MySQLWrapper;
