@@ -68,7 +68,7 @@ router.post('/', async function (req, res) {
     return;
   }
 
-  var results = await classifyArticle(req.body, 'post');
+  var results = await classify(req.body, 'post');
   if (results.length == 0) {
     res.status(400).send('Failed to get results for the content');
   } else {
@@ -81,7 +81,7 @@ router.post('/', async function (req, res) {
   }
 });
 
-async function classifyArticle(req, methodType) {
+router.classify = async (req, methodType) => {
   console.log('path: ' + req.baseUrl);
   console.log('query: ' + JSON.stringify(req.query));
   var finalResult = new FinalResult();
